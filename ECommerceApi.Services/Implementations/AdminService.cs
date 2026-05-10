@@ -181,32 +181,26 @@ namespace ECommerceApi.Services.Implementations
         {
             try
             {
-                // Validation: Check if database context is available
                 if (db == null)
                 {
                     return ApiResponse<AdminStatsDto>.Failure("Database context is not available");
                 }
 
-                // Get all stats in parallel for better performance
-                var totalUsersTask = userManager.Users.CountAsync();
-                var totalOrdersTask = db.Orders.CountAsync();
-                var totalProductsTask = db.Products.CountAsync(p => p.IsActive);
-                var totalRevenueTask = db.Orders
+                var totalUsers = await userManager.Users.CountAsync();
+                var totalOrders = await db.Orders.CountAsync();
+                var totalProducts = await db.Products.CountAsync(p => p.IsActive);
+                var totalRevenue = await db.Orders
                     .Where(o => o.Status != OrderStatus.Cancelled)
                     .SumAsync(o => o.Total);
 
-                await Task.WhenAll(totalUsersTask, totalOrdersTask, totalProductsTask, totalRevenueTask);
-
-                // Validation: Stats should never be negative
                 var stats = new AdminStatsDto
                 {
-                    TotalUsers = totalUsersTask.Result,
-                    TotalOrders = totalOrdersTask.Result,
-                    TotalProducts = totalProductsTask.Result,
-                    TotalRevenue = totalRevenueTask.Result >= 0 ? totalRevenueTask.Result : 0
+                    TotalUsers = totalUsers,
+                    TotalOrders = totalOrders,
+                    TotalProducts = totalProducts,
+                    TotalRevenue = totalRevenue >= 0 ? totalRevenue : 0
                 };
 
-                // Optional: Add warning if some stats are zero
                 var message = "Statistics retrieved successfully";
                 if (stats.TotalUsers == 0 && stats.TotalOrders == 0 && stats.TotalProducts == 0)
                 {
