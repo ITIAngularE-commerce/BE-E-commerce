@@ -46,7 +46,15 @@ namespace ECommerceApi.Services.Implementations
             // إرسال تأكيد الإيميل
             var token = await userManager.GenerateEmailConfirmationTokenAsync(user);
             var link = $"https://localhost:7001/api/v1/auth/confirm-email?userId={user.Id}&token={Uri.EscapeDataString(token)}";
+            try
+            {
             await emailService.SendEmailConfirmationAsync(user.Email!, user.FullName, link);
+            }
+            catch
+            {
+                // Email failed but registration still succeeds
+
+            }
 
             return await GenerateTokenAsync(user);
         }
