@@ -1,0 +1,17 @@
+﻿global using ECommerceApi.Services.DTOs.Admin;
+global using ECommerceApi.Services.DTOs.Common;
+global using ECommerceApi.Services.DTOs.Order;
+global using ECommerceApi.Services.DTOs.User;
+global using ECommerceApi.Services.DTOs.Auth;
+global using System.IdentityModel.Tokens.Jwt;
+global using ECommerceApi.Data.Models;
+global using ECommerceApi.Services.Interfaces;
+global using Microsoft.AspNetCore.Identity;
+global using Microsoft.Extensions.Configuration;
+global using System.Security.Claims;
+global using System.Security.Cryptography;
+global using System.Text;
+global using Microsoft.IdentityModel.Tokens;
+global using Google.Apis.Auth;
+global using ECommerceApi.Data;
+global using Microsoft.EntityFrameworkCore;

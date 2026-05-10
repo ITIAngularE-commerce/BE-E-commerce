@@ -1,19 +1,4 @@
-﻿using System.IdentityModel.Tokens.Jwt;
-using ECommerceApi.Data.Models;
-using ECommerceApi.Services.DTOs.Auth;
-using ECommerceApi.Services.Interfaces;
-using Microsoft.AspNetCore.Identity;
-using Microsoft.Extensions.Configuration;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Security.Claims;
-using System.Security.Cryptography;
-using System.Text;
-using System.Threading.Tasks;
-using Microsoft.IdentityModel.Tokens;
-using Google.Apis.Auth;
-
+﻿
 namespace ECommerceApi.Services.Implementations
 {
     public class AuthService(
@@ -21,11 +6,14 @@ namespace ECommerceApi.Services.Implementations
         IConfiguration config,
         IEmailService emailService) : IAuthService
     {
-        public async Task<AuthResponseDto?> RegisterAsync(RegisterDto dto)
+        public async Task<ApiResponse<AuthResponseDto>> RegisterAsync(RegisterDto dto)
         {
+            // 1. Check if email already exists
             var existing = await userManager.FindByEmailAsync(dto.Email);
-            if (existing != null) return null;
+            if (existing != null)
+                return ApiResponse<AuthResponseDto>.Failure("البريد الإلكتروني مسجل بالفعل");
 
+            // 2. Create new user
             var user = new ApplicationUser
             {
                 FullName = dto.FullName,
@@ -35,43 +23,58 @@ namespace ECommerceApi.Services.Implementations
             };
 
             var result = await userManager.CreateAsync(user, dto.Password);
-            if (!result.Succeeded) return null;
+            if (!result.Succeeded)
+            {
+                var errors = result.Errors.Select(e => e.Description).ToList();
+                return ApiResponse<AuthResponseDto>.Failure(errors);
+            }
 
-            // إضافة الـ Role
+            // 3. Add role
             var role = dto.Role is "Seller" or "Admin" ? dto.Role : "Customer";
             await userManager.AddToRoleAsync(user, role);
 
-            // إنشاء كارت فارغ للمستخدم — هيتعمل في CartService أول ما يطلبه
-
-            // إرسال تأكيد الإيميل
+            // 4. Send email confirmation (optional - don't fail registration if email fails)
             var token = await userManager.GenerateEmailConfirmationTokenAsync(user);
             var link = $"https://localhost:7001/api/v1/auth/confirm-email?userId={user.Id}&token={Uri.EscapeDataString(token)}";
             try
             {
-            await emailService.SendEmailConfirmationAsync(user.Email!, user.FullName, link);
+                await emailService.SendEmailConfirmationAsync(user.Email!, user.FullName, link);
             }
             catch
             {
                 // Email failed but registration still succeeds
-
+                Console.WriteLine($"Failed to send email to {user.Email}");
             }
 
-            return await GenerateTokenAsync(user);
+            // 5. Generate token and return success
+            var authResponse = await GenerateTokenAsync(user);
+            return ApiResponse<AuthResponseDto>.Success(authResponse);
         }
 
-        public async Task<AuthResponseDto?> LoginAsync(LoginDto dto)
+        public async Task<ApiResponse<AuthResponseDto>> LoginAsync(LoginDto dto)
         {
+            // 1. Find user by email
             var user = await userManager.FindByEmailAsync(dto.Email);
-            if (user == null || !user.IsActive) return null;
+            if (user == null)
+                return ApiResponse<AuthResponseDto>.Failure("لا يوجد حساب بهذا البريد الإلكتروني");
 
+            // 2. Check if account is active
+            if (!user.IsActive)
+                return ApiResponse<AuthResponseDto>.Failure("هذا الحساب غير نشط. يرجى التواصل مع الدعم");
+
+            // 3. Check password
             var valid = await userManager.CheckPasswordAsync(user, dto.Password);
-            if (!valid) return null;
+            if (!valid)
+                return ApiResponse<AuthResponseDto>.Failure("كلمة المرور غير صحيحة");
 
-            return await GenerateTokenAsync(user);
+            // 4. Generate token and return success
+            var authResponse = await GenerateTokenAsync(user);
+            return ApiResponse<AuthResponseDto>.Success(authResponse);
         }
 
-        public async Task<AuthResponseDto?> GoogleLoginAsync(string idToken)
+        public async Task<ApiResponse<AuthResponseDto>> GoogleLoginAsync(string idToken)
         {
+            // 1. Validate Google token
             GoogleJsonWebSignature.Payload payload;
             try
             {
@@ -80,8 +83,12 @@ namespace ECommerceApi.Services.Implementations
                     Audience = [config["Google:ClientId"]!]
                 });
             }
-            catch { return null; }
+            catch
+            {
+                return ApiResponse<AuthResponseDto>.Failure("Google token غير صالح");
+            }
 
+            // 2. Find or create user
             var user = await userManager.FindByEmailAsync(payload.Email);
             if (user == null)
             {
@@ -92,27 +99,49 @@ namespace ECommerceApi.Services.Implementations
                     UserName = payload.Email,
                     EmailConfirmed = true
                 };
-                await userManager.CreateAsync(user);
+
+                var createResult = await userManager.CreateAsync(user);
+                if (!createResult.Succeeded)
+                {
+                    var errors = createResult.Errors.Select(e => e.Description).ToList();
+                    return ApiResponse<AuthResponseDto>.Failure(errors);
+                }
+
                 await userManager.AddToRoleAsync(user, "Customer");
             }
 
-            if (!user.IsActive) return null;
-            return await GenerateTokenAsync(user);
+            // 3. Check if account is active
+            if (!user.IsActive)
+                return ApiResponse<AuthResponseDto>.Failure("هذا الحساب غير نشط");
+
+            // 4. Generate token and return success
+            var authResponse = await GenerateTokenAsync(user);
+            return ApiResponse<AuthResponseDto>.Success(authResponse);
         }
 
-        public async Task<bool> ConfirmEmailAsync(string userId, string token)
+        public async Task<ApiResponse<string>> ConfirmEmailAsync(string userId, string token)
         {
+            // 1. Find user
             var user = await userManager.FindByIdAsync(userId);
-            if (user == null) return false;
+            if (user == null)
+                return ApiResponse<string>.Failure("المستخدم غير موجود");
 
+            // 2. Confirm email
             var result = await userManager.ConfirmEmailAsync(user, token);
-            return result.Succeeded;
+            if (!result.Succeeded)
+            {
+                var errors = result.Errors.Select(e => e.Description).ToList();
+                return ApiResponse<string>.Failure(errors);
+            }
+
+            // 3. Return success
+            return ApiResponse<string>.Success("تم تأكيد البريد الإلكتروني بنجاح");
         }
 
         public Task<bool> LogoutAsync(string userId)
         {
-            // JWT stateless — الـ logout بيتعمل من الـ client بحذف التوكن
-            // لو محتاجين blacklist نضيف Redis هنا
+            // JWT stateless — logout is handled by client by deleting token
+            // If you need blacklist, add Redis here
             return Task.FromResult(true);
         }
 
@@ -125,13 +154,13 @@ namespace ECommerceApi.Services.Implementations
             var expiry = DateTime.UtcNow.AddDays(double.Parse(config["JWT:DurationInDays"]!));
 
             var claims = new List<Claim>
-        {
-            new(ClaimTypes.NameIdentifier, user.Id),
-            new(ClaimTypes.Email,          user.Email!),
-            new(ClaimTypes.Name,           user.FullName),
-            new(ClaimTypes.Role,           role),
-            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
-        };
+            {
+                new(ClaimTypes.NameIdentifier, user.Id),
+                new(ClaimTypes.Email, user.Email!),
+                new(ClaimTypes.Name, user.FullName),
+                new(ClaimTypes.Role, role),
+                new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+            };
 
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(config["JWT:Key"]!));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -162,4 +191,4 @@ namespace ECommerceApi.Services.Implementations
             return Convert.ToBase64String(bytes);
         }
     }
- }
+}

@@ -8,15 +8,42 @@ namespace ECommerceApi.Services.DTOs.Common
 {
     public class ApiResponse<T>
     {
-        public bool Success { get; set; }
-        public string Message { get; set; } = string.Empty;
+        public bool IsSuccess { get; set; }
         public T? Data { get; set; }
-        public object? Errors { get; set; }
+        public string? ErrorMessage { get; set; }
+        public List<string>? Errors { get; set; }
+        public string? Message { get; set; }  
 
-        public static ApiResponse<T> Ok(T data, string message = "Success") =>
-            new() { Success = true, Message = message, Data = data };
+        public static ApiResponse<T> Success(T data) => new()
+        {
+            IsSuccess = true,
+            Data = data
+        };
 
-        public static ApiResponse<T> Fail(string message, object? errors = null) =>
-            new() { Success = false, Message = message, Errors = errors };
+        public static ApiResponse<T> Success(T data, string message = "Data retrieved successfully.") => new()
+        {
+            IsSuccess = true,
+            Data = data,
+            Message = message
+        };
+
+        public static ApiResponse<T> Failure(string error) => new()
+        {
+            IsSuccess = false,
+            ErrorMessage = error
+        };
+
+        public static ApiResponse<T> Failure(List<string> errors) => new()
+        {
+            IsSuccess = false,
+            Errors = errors
+        };
+
+        public static ApiResponse<T> Failure(string message, List<string> errors) => new()
+        {
+            IsSuccess = false,
+            Message = message,
+            Errors = errors
+        };
     }
 }

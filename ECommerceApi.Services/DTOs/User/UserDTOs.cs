@@ -14,6 +14,7 @@ namespace ECommerceApi.Services.DTOs.User
         public string PhoneNumber { get; set; } = string.Empty;
         public string Role { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
+        public bool IsActive { get; set; } = true;
     }
 
     public class UpdateProfileDto
