@@ -3,6 +3,7 @@ using ECommerceApi.Data;
 using ECommerceApi.Data.Models;
 using ECommerceApi.Services.Implementations;
 using ECommerceApi.Services.Interfaces;
+using Google;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -107,6 +108,32 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    try
+    {
+        var canConnect = await dbContext.Database.CanConnectAsync();
+
+        if (!canConnect)
+        {
+            await dbContext.Database.MigrateAsync();
+        }
+        else
+        {
+            var pendingMigrations = await dbContext.Database.GetPendingMigrationsAsync();
+            if (pendingMigrations.Any())
+            {
+                await dbContext.Database.MigrateAsync();
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Migration error: {ex.Message}");
+    }
+}
+
 // ── Seed Roles ──────────────────────────────────────────────
 using (var scope = app.Services.CreateScope())
 {
@@ -116,12 +143,10 @@ using (var scope = app.Services.CreateScope())
             await roleManager.CreateAsync(new IdentityRole(role));
 }
 
-// ── Middleware Pipeline ──────────────────────────────────────
-if (app.Environment.IsDevelopment())
-{
+
     app.UseSwagger();
     app.UseSwaggerUI();
-}
+
 
 app.UseHttpsRedirection();
 app.UseCors("AllowAngular");
