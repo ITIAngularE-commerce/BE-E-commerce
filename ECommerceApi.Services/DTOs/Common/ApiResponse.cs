@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
+﻿
 namespace ECommerceApi.Services.DTOs.Common
 {
     public class ApiResponse<T>
@@ -20,7 +15,8 @@ namespace ECommerceApi.Services.DTOs.Common
             Data = data
         };
 
-        public static ApiResponse<T> Success(T data, string message = "Data retrieved successfully.") => new()
+        public static ApiResponse<T> Success(T data, string message = "Data retrieved successfully."
+            ) => new()
         {
             IsSuccess = true,
             Data = data,

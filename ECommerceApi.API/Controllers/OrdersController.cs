@@ -1,70 +1,274 @@
-﻿////using ECommerceApi.Services.DTOs.Common;
-//using ECommerceApi.Services.DTOs.Order;
-//using ECommerceApi.Services.Interfaces;
-//using Microsoft.AspNetCore.Authorization;
-//using Microsoft.AspNetCore.Mvc;
-//using System.Security.Claims;
+﻿using ECommerceApi.Services.DTOs.Common;
+using ECommerceApi.Services.DTOs.Order;
+using ECommerceApi.Services.Interfaces;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
-//namespace ECommerceApi.API.Controllers
-//{
-//    [ApiController]
-//    [Route("api/v1/orders")]
-//    [Authorize]
-//    public class OrdersController(IOrderService orderService) : ControllerBase
-//    {
-//        private string UserId => User.FindFirstValue(ClaimTypes.NameIdentifier)!;
-//        private string Role => User.FindFirstValue(ClaimTypes.Role) ?? "Customer";
+namespace ECommerceApi.API.Controllers
+{
+    [ApiController]
+    [Route("api/v1/orders")]
+    public class OrderController(IOrderService orderService) : ControllerBase
+    {
+        [HttpPost]
+        [Authorize(Roles = "Customer,Seller,Admin")]
+        public async Task<IActionResult> Create([FromBody] CreateOrderDto dto)
+        {
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = "User not authenticated"
+                });
+            }
 
-//        // ── POST /api/v1/orders ──────────────────────────────────
-//        [HttpPost]
-//        public async Task<IActionResult> Create(CreateOrderDto dto)
-//        {
-//            try
-//            {
-//                var order = await orderService.CreateAsync(UserId, dto);
-//                return CreatedAtAction(nameof(GetById), new { id = order.Id },
-//                    ApiResponse<OrderDto>.Ok(order, "تم إنشاء الطلب بنجاح"));
-//            }
-//            catch (Exception ex)
-//            {
-//                return BadRequest(ApiResponse<string>.Fail(ex.Message));
-//            }
-//        }
+            var result = await orderService.CreateAsync(userId, dto);
 
-//        // ── GET /api/v1/orders ───────────────────────────────────
-//        [HttpGet]
-//        public async Task<IActionResult> GetMyOrders()
-//        {
-//            var orders = await orderService.GetUserOrdersAsync(UserId);
-//            return Ok(ApiResponse<List<OrderDto>>.Ok(orders));
-//        }
+            if (!result.IsSuccess)
+            {
+                if (result.Errors != null && result.Errors.Any())
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Failed to create order",
+                        errors = result.Errors
+                    });
+                }
 
-//        // ── GET /api/v1/orders/{id} ──────────────────────────────
-//        [HttpGet("{id}")]
-//        public async Task<IActionResult> GetById(int id)
-//        {
-//            var order = await orderService.GetByIdAsync(id, UserId, Role);
-//            if (order == null) return NotFound(ApiResponse<string>.Fail("الطلب غير موجود"));
-//            return Ok(ApiResponse<OrderDto>.Ok(order));
-//        }
+                return BadRequest(new
+                {
+                    success = false,
+                    message = result.ErrorMessage
+                });
+            }
 
-//        // ── PATCH /api/v1/orders/{id}/cancel ─────────────────────
-//        [HttpPatch("{id}/cancel")]
-//        public async Task<IActionResult> Cancel(int id)
-//        {
-//            var result = await orderService.CancelAsync(id, UserId);
-//            if (!result) return BadRequest(ApiResponse<string>.Fail("لا يمكن إلغاء هذا الطلب"));
-//            return Ok(ApiResponse<string>.Ok("تم إلغاء الطلب"));
-//        }
+            return Ok(new
+            {
+                success = true,
+                message = result.Message,
+                data = result.Data
+            });
+        }
 
-//        // ── PATCH /api/v1/orders/{id}/status ─────────────────────
-//        [HttpPatch("{id}/status")]
-//        [Authorize(Roles = "Admin,Seller")]
-//        public async Task<IActionResult> UpdateStatus(int id, UpdateOrderStatusDto dto)
-//        {
-//            var result = await orderService.UpdateStatusAsync(id, dto.Status);
-//            if (!result) return NotFound(ApiResponse<string>.Fail("الطلب غير موجود"));
-//            return Ok(ApiResponse<string>.Ok("تم تحديث حالة الطلب"));
-//        }
-//    }
-//}
+        [HttpGet]
+        [Authorize(Roles = "Customer,Seller,Admin")]
+        public async Task<IActionResult> GetMyOrders()
+        {
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = "User not authenticated"
+                });
+            }
+
+            var result = await orderService.GetUserOrdersAsync(userId);
+
+            if (!result.IsSuccess)
+            {
+                if (result.Errors != null && result.Errors.Any())
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Failed to retrieve orders",
+                        errors = result.Errors
+                    });
+                }
+
+                return BadRequest(new
+                {
+                    success = false,
+                    message = result.ErrorMessage
+                });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = result.Message,
+                data = result.Data
+            });
+        }
+
+        [HttpGet("{id}")]
+        [Authorize(Roles = "Customer,Seller,Admin")]
+        public async Task<IActionResult> GetById(int id)
+        {
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var role = User.FindFirst(ClaimTypes.Role)?.Value ?? "Customer";
+
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = "User not authenticated"
+                });
+            }
+
+            var result = await orderService.GetByIdAsync(id, userId, role);
+
+            if (!result.IsSuccess)
+            {
+                if (result.Errors != null && result.Errors.Any())
+                {
+                    return NotFound(new
+                    {
+                        success = false,
+                        message = "Failed to retrieve order",
+                        errors = result.Errors
+                    });
+                }
+
+                return NotFound(new
+                {
+                    success = false,
+                    message = result.ErrorMessage
+                });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = result.Message,
+                data = result.Data
+            });
+        }
+
+        [HttpPost("{id}/cancel")]
+        [Authorize(Roles = "Customer,Seller,Admin")]
+        public async Task<IActionResult> Cancel(int id)
+        {
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = "User not authenticated"
+                });
+            }
+
+            var result = await orderService.CancelAsync(id, userId);
+
+            if (!result.IsSuccess)
+            {
+                if (result.Errors != null && result.Errors.Any())
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Failed to cancel order",
+                        errors = result.Errors
+                    });
+                }
+
+                return BadRequest(new
+                {
+                    success = false,
+                    message = result.ErrorMessage
+                });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = result.Message,
+                data = result.Data
+            });
+        }
+
+        [HttpPatch("{id}/status")]
+        [Authorize(Roles = "Admin")]
+        public async Task<IActionResult> UpdateStatus(int id, [FromBody] UpdateOrderStatusDto dto)
+        {
+            var adminId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(adminId))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = "User not authenticated"
+                });
+            }
+
+            var result = await orderService.UpdateStatusAsync(id, dto.Status, adminId);
+
+            if (!result.IsSuccess)
+            {
+                if (result.Errors != null && result.Errors.Any())
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Failed to update order status",
+                        errors = result.Errors
+                    });
+                }
+
+                return BadRequest(new
+                {
+                    success = false,
+                    message = result.ErrorMessage
+                });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = result.Message,
+                data = result.Data
+            });
+        }
+
+        [HttpGet("admin/all")]
+        [Authorize(Roles = "Admin")]
+        public async Task<IActionResult> GetAllOrders()
+        {
+            var adminId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(adminId))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = "User not authenticated"
+                });
+            }
+
+            var result = await orderService.GetAllOrdersAsync(adminId);
+
+            if (!result.IsSuccess)
+            {
+                if (result.Errors != null && result.Errors.Any())
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Failed to retrieve all orders",
+                        errors = result.Errors
+                    });
+                }
+
+                return BadRequest(new
+                {
+                    success = false,
+                    message = result.ErrorMessage
+                });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = result.Message,
+                data = result.Data
+            });
+        }
+    }
+}

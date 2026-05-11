@@ -1,5 +1,5 @@
 ﻿using ECommerceApi.Services.DTOs.Common;
-using ECommerceApi.Services.DTOs.Product;
+using ECommerceApi.Services.DTOs.Review;
 using ECommerceApi.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -8,13 +8,18 @@ using System.Security.Claims;
 namespace ECommerceApi.API.Controllers
 {
     [ApiController]
-    [Route("api/v1/products")]
-    public class ProductController(IProductService productService) : ControllerBase
+    [Route("api/v1/reviews")]
+    public class ReviewController(IReviewService reviewService) : ControllerBase
     {
-        [HttpGet]
-        public async Task<IActionResult> GetAll([FromQuery] ProductFilterDto filter)
+        private string GetUserId()
         {
-            var result = await productService.GetAllAsync(filter);
+            return User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        }
+
+        [HttpGet("product/{productId}")]
+        public async Task<IActionResult> GetProductReviews(int productId)
+        {
+            var result = await reviewService.GetProductReviewsAsync(productId);
 
             if (!result.IsSuccess)
             {
@@ -23,39 +28,7 @@ namespace ECommerceApi.API.Controllers
                     return BadRequest(new
                     {
                         success = false,
-                        message = "Failed to retrieve products",
-                        errors = result.Errors
-                    });
-                }
-
-                return BadRequest(new
-                {
-                    success = false,
-                    message = result.ErrorMessage
-                });
-            }
-
-            return Ok(new
-            {
-                success = true,
-                message = result.Message,
-                data = result.Data
-            });
-        }
-
-        [HttpGet("{id}")]
-        public async Task<IActionResult> GetById(int id)
-        {
-            var result = await productService.GetByIdAsync(id);
-
-            if (!result.IsSuccess)
-            {
-                if (result.Errors != null && result.Errors.Any())
-                {
-                    return NotFound(new
-                    {
-                        success = false,
-                        message = "Failed to retrieve product",
+                        message = "Failed to retrieve reviews",
                         errors = result.Errors
                     });
                 }
@@ -75,10 +48,76 @@ namespace ECommerceApi.API.Controllers
             });
         }
 
-        [HttpGet("seller/{sellerId}")]
-        public async Task<IActionResult> GetProductsBySeller(string sellerId)
+        [HttpGet("product/{productId}/rating")]
+        public async Task<IActionResult> GetProductRating(int productId)
         {
-            var result = await productService.GetProductsBySellerAsync(sellerId);
+            var result = await reviewService.GetProductRatingAsync(productId);
+
+            if (!result.IsSuccess)
+            {
+                return NotFound(new
+                {
+                    success = false,
+                    message = result.ErrorMessage
+                });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = result.Message,
+                data = result.Data
+            });
+        }
+
+        [HttpGet("my-reviews")]
+        [Authorize]
+        public async Task<IActionResult> GetMyReviews()
+        {
+            var userId = GetUserId();
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = "User not authenticated"
+                });
+            }
+
+            var result = await reviewService.GetUserReviewsAsync(userId);
+
+            if (!result.IsSuccess)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = result.ErrorMessage
+                });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = result.Message,
+                data = result.Data
+            });
+        }
+
+        [HttpPost("product/{productId}")]
+        [Authorize]
+        public async Task<IActionResult> CreateReview(int productId, [FromBody] CreateReviewDto dto)
+        {
+            var userId = GetUserId();
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = "User not authenticated"
+                });
+            }
+
+            var result = await reviewService.CreateAsync(productId, userId, dto);
 
             if (!result.IsSuccess)
             {
@@ -87,7 +126,7 @@ namespace ECommerceApi.API.Controllers
                     return BadRequest(new
                     {
                         success = false,
-                        message = "Failed to retrieve seller products",
+                        message = "Failed to create review",
                         errors = result.Errors
                     });
                 }
@@ -107,12 +146,12 @@ namespace ECommerceApi.API.Controllers
             });
         }
 
-        [HttpPost]
-        [Authorize(Roles = "Seller,Admin")]
-        public async Task<IActionResult> Create([FromForm] CreateProductDto dto)
+        [HttpPut("{reviewId}")]
+        [Authorize]
+        public async Task<IActionResult> UpdateReview(int reviewId, [FromBody] UpdateReviewDto dto)
         {
-            var sellerId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (string.IsNullOrEmpty(sellerId))
+            var userId = GetUserId();
+            if (string.IsNullOrEmpty(userId))
             {
                 return Unauthorized(new
                 {
@@ -121,7 +160,7 @@ namespace ECommerceApi.API.Controllers
                 });
             }
 
-            var result = await productService.CreateAsync(sellerId, dto);
+            var result = await reviewService.UpdateAsync(reviewId, userId, dto);
 
             if (!result.IsSuccess)
             {
@@ -130,50 +169,7 @@ namespace ECommerceApi.API.Controllers
                     return BadRequest(new
                     {
                         success = false,
-                        message = "Failed to create product",
-                        errors = result.Errors
-                    });
-                }
-
-                return BadRequest(new
-                {
-                    success = false,
-                    message = result.ErrorMessage
-                });
-            }
-
-            return Ok(new
-            {
-                success = true,
-                message = result.Message,
-                data = result.Data
-            });
-        }
-
-        [HttpPut("{id}")]
-        [Authorize(Roles = "Seller,Admin")]
-        public async Task<IActionResult> Update(int id, [FromForm] UpdateProductDto dto)
-        {
-            var sellerId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (string.IsNullOrEmpty(sellerId))
-            {
-                return Unauthorized(new
-                {
-                    success = false,
-                    message = "User not authenticated"
-                });
-            }
-
-            var result = await productService.UpdateAsync(id, sellerId, dto);
-
-            if (!result.IsSuccess)
-            {
-                if (result.Errors != null && result.Errors.Any())
-                {
-                    return BadRequest(new
-                    {
-                        success = false,
-                        message = "Failed to update product",
+                        message = "Failed to update review",
                         errors = result.Errors
                     });
                 }
@@ -193,57 +189,14 @@ namespace ECommerceApi.API.Controllers
             });
         }
 
-        [HttpPatch("{id}/stock")]
-        [Authorize(Roles = "Seller,Admin")]
-        public async Task<IActionResult> UpdateStock(int id, [FromBody] UpdateStockDto dto)
+        [HttpDelete("{reviewId}")]
+        [Authorize]
+        public async Task<IActionResult> DeleteReview(int reviewId)
         {
-            var sellerId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (string.IsNullOrEmpty(sellerId))
-            {
-                return Unauthorized(new
-                {
-                    success = false,
-                    message = "User not authenticated"
-                });
-            }
-
-            var result = await productService.UpdateStockAsync(id, dto.Quantity, sellerId);
-
-            if (!result.IsSuccess)
-            {
-                if (result.Errors != null && result.Errors.Any())
-                {
-                    return BadRequest(new
-                    {
-                        success = false,
-                        message = "Failed to update stock",
-                        errors = result.Errors
-                    });
-                }
-
-                return BadRequest(new
-                {
-                    success = false,
-                    message = result.ErrorMessage
-                });
-            }
-
-            return Ok(new
-            {
-                success = true,
-                message = result.Message,
-                data = result.Data
-            });
-        }
-
-        [HttpDelete("{id}")]
-        [Authorize(Roles = "Seller,Admin")]
-        public async Task<IActionResult> Delete(int id)
-        {
-            var sellerId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = GetUserId();
             var role = User.FindFirst(ClaimTypes.Role)?.Value ?? "Customer";
 
-            if (string.IsNullOrEmpty(sellerId))
+            if (string.IsNullOrEmpty(userId))
             {
                 return Unauthorized(new
                 {
@@ -252,7 +205,7 @@ namespace ECommerceApi.API.Controllers
                 });
             }
 
-            var result = await productService.DeleteAsync(id, sellerId, role);
+            var result = await reviewService.DeleteAsync(reviewId, userId, role);
 
             if (!result.IsSuccess)
             {
@@ -261,7 +214,7 @@ namespace ECommerceApi.API.Controllers
                     return BadRequest(new
                     {
                         success = false,
-                        message = "Failed to delete product",
+                        message = "Failed to delete review",
                         errors = result.Errors
                     });
                 }

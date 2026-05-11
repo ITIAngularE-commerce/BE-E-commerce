@@ -1,73 +1,257 @@
-﻿//using ECommerceApi.Services.DTOs.Cart;
-//using ECommerceApi.Services.DTOs.Common;
-//using ECommerceApi.Services.Interfaces;
-//using Microsoft.AspNetCore.Authorization;
-//using Microsoft.AspNetCore.Mvc;
-//using System.Security.Claims;
+﻿using ECommerceApi.Services.DTOs.Cart;
+using ECommerceApi.Services.DTOs.Common;
+using ECommerceApi.Services.Interfaces;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
-//namespace ECommerceApi.API.Controllers
-//{
-//    [ApiController]
-//    [Route("api/v1/cart")]
-//    [Authorize]
-//    public class CartController(ICartService cartService) : ControllerBase
-//    {
-//        private string UserId => User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+namespace ECommerceApi.API.Controllers
+{
+    [ApiController]
+    [Route("api/v1/cart")]
+    [Authorize]
+    public class CartController(ICartService cartService) : ControllerBase
+    {
+        [HttpGet]
+        public async Task<IActionResult> GetCart()
+        {
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = "User not authenticated"
+                });
+            }
 
-//        // ── GET /api/v1/cart ─────────────────────────────────────
-//        [HttpGet]
-//        public async Task<IActionResult> GetCart()
-//        {
-//            var cart = await cartService.GetCartAsync(UserId);
-//            return Ok(ApiResponse<CartDto>.Ok(cart));
-//        }
+            var result = await cartService.GetCartAsync(userId);
 
-//        // ── POST /api/v1/cart/items ──────────────────────────────
-//        [HttpPost("items")]
-//        public async Task<IActionResult> AddItem(AddToCartDto dto)
-//        {
-//            try
-//            {
-//                var cart = await cartService.AddItemAsync(UserId, dto);
-//                return Ok(ApiResponse<CartDto>.Ok(cart, "تم إضافة المنتج للكارت"));
-//            }
-//            catch (Exception ex)
-//            {
-//                return BadRequest(ApiResponse<string>.Fail(ex.Message));
-//            }
-//        }
+            if (!result.IsSuccess)
+            {
+                if (result.Errors != null && result.Errors.Any())
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Failed to retrieve cart",
+                        errors = result.Errors
+                    });
+                }
 
-//        // ── PATCH /api/v1/cart/items/{id} ────────────────────────
-//        [HttpPatch("items/{id}")]
-//        public async Task<IActionResult> UpdateItem(int id, UpdateCartItemDto dto)
-//        {
-//            try
-//            {
-//                var cart = await cartService.UpdateItemAsync(UserId, id, dto);
-//                return Ok(ApiResponse<CartDto>.Ok(cart, "تم التحديث"));
-//            }
-//            catch (Exception ex)
-//            {
-//                return BadRequest(ApiResponse<string>.Fail(ex.Message));
-//            }
-//        }
+                return BadRequest(new
+                {
+                    success = false,
+                    message = result.ErrorMessage
+                });
+            }
 
-//        // ── DELETE /api/v1/cart/items/{id} ───────────────────────
-//        [HttpDelete("items/{id}")]
-//        public async Task<IActionResult> RemoveItem(int id)
-//        {
-//            var cart = await cartService.RemoveItemAsync(UserId, id);
-//            return Ok(ApiResponse<CartDto>.Ok(cart, "تم الحذف من الكارت"));
-//        }
+            return Ok(new
+            {
+                success = true,
+                message = result.Message,
+                data = result.Data
+            });
+        }
 
-//        // ── DELETE /api/v1/cart/clear ────────────────────────────
-//        [HttpDelete("clear")]
-//        public async Task<IActionResult> ClearCart()
-//        {
-//            await cartService.ClearCartAsync(UserId);
-//            return Ok(ApiResponse<string>.Ok("تم مسح الكارت"));
-//        }
-//    }
+        [HttpGet("count")]
+        public async Task<IActionResult> GetCartItemCount()
+        {
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = "User not authenticated"
+                });
+            }
 
+            var result = await cartService.GetCartItemCountAsync(userId);
 
-//}
+            if (!result.IsSuccess)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = result.ErrorMessage
+                });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = result.Message,
+                data = result.Data
+            });
+        }
+
+        [HttpPost("items")]
+        public async Task<IActionResult> AddItem([FromBody] AddToCartDto dto)
+        {
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = "User not authenticated"
+                });
+            }
+
+            var result = await cartService.AddItemAsync(userId, dto);
+
+            if (!result.IsSuccess)
+            {
+                if (result.Errors != null && result.Errors.Any())
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Failed to add item to cart",
+                        errors = result.Errors
+                    });
+                }
+
+                return BadRequest(new
+                {
+                    success = false,
+                    message = result.ErrorMessage
+                });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = result.Message,
+                data = result.Data
+            });
+        }
+
+        [HttpPut("items/{cartItemId}")]
+        public async Task<IActionResult> UpdateItem(int cartItemId, [FromBody] UpdateCartItemDto dto)
+        {
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = "User not authenticated"
+                });
+            }
+
+            var result = await cartService.UpdateItemAsync(userId, cartItemId, dto);
+
+            if (!result.IsSuccess)
+            {
+                if (result.Errors != null && result.Errors.Any())
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Failed to update cart item",
+                        errors = result.Errors
+                    });
+                }
+
+                return BadRequest(new
+                {
+                    success = false,
+                    message = result.ErrorMessage
+                });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = result.Message,
+                data = result.Data
+            });
+        }
+
+        [HttpDelete("items/{cartItemId}")]
+        public async Task<IActionResult> RemoveItem(int cartItemId)
+        {
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = "User not authenticated"
+                });
+            }
+
+            var result = await cartService.RemoveItemAsync(userId, cartItemId);
+
+            if (!result.IsSuccess)
+            {
+                if (result.Errors != null && result.Errors.Any())
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Failed to remove item from cart",
+                        errors = result.Errors
+                    });
+                }
+
+                return BadRequest(new
+                {
+                    success = false,
+                    message = result.ErrorMessage
+                });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = result.Message,
+                data = result.Data
+            });
+        }
+
+        [HttpDelete("clear")]
+        public async Task<IActionResult> ClearCart()
+        {
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = "User not authenticated"
+                });
+            }
+
+            var result = await cartService.ClearCartAsync(userId);
+
+            if (!result.IsSuccess)
+            {
+                if (result.Errors != null && result.Errors.Any())
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Failed to clear cart",
+                        errors = result.Errors
+                    });
+                }
+
+                return BadRequest(new
+                {
+                    success = false,
+                    message = result.ErrorMessage
+                });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = result.Message,
+                data = result.Data
+            });
+        }
+    }
+}

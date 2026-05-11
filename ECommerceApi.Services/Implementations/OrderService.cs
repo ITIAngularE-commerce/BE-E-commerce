@@ -1,121 +1,259 @@
-﻿using ECommerceApi.Data.Models;
-using ECommerceApi.Data;
-using ECommerceApi.Services.DTOs.Order;
-using ECommerceApi.Services.Interfaces;
-using Microsoft.AspNetCore.Identity;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
-
-
+﻿
 namespace ECommerceApi.Services.Implementations
 {
     public class OrderService(AppDbContext db, IEmailService emailService,
         UserManager<ApplicationUser> userManager) : IOrderService
     {
-        public async Task<OrderDto> CreateAsync(string userId, CreateOrderDto dto)
+        public async Task<ApiResponse<OrderDto>> CreateAsync(string userId, CreateOrderDto dto)
         {
-            var cart = await db.Carts
-                .Include(c => c.Items).ThenInclude(i => i.Product)
-                .FirstOrDefaultAsync(c => c.UserId == userId)
-                ?? throw new Exception("Cart is empty");
-
-            if (!cart.Items.Any()) throw new Exception("Cart is empty");
-
-            var address = await db.Addresses.FindAsync(dto.AddressId)
-                          ?? throw new Exception("Address not found");
-
-            var paymentMethod = Enum.Parse<PaymentMethod>(dto.PaymentMethod);
-
-            var order = new Order
+            try
             {
-                UserId = userId,
-                AddressId = dto.AddressId,
-                PaymentMethod = paymentMethod,
-                TrackingCode = Guid.NewGuid().ToString("N")[..10].ToUpper(),
-                Status = OrderStatus.Pending
-            };
+                if (string.IsNullOrWhiteSpace(userId))
+                    return ApiResponse<OrderDto>.Failure("User ID is required");
 
-            foreach (var item in cart.Items)
-            {
-                order.Items.Add(new OrderItem
+                var cart = await db.Carts
+                    .Include(c => c.Items)
+                    .ThenInclude(i => i.Product)
+                    .FirstOrDefaultAsync(c => c.UserId == userId);
+
+                if (cart == null || !cart.Items.Any())
+                    return ApiResponse<OrderDto>.Failure("Cart is empty");
+
+                if (dto.AddressId <= 0)
+                    return ApiResponse<OrderDto>.Failure("Valid address ID is required");
+
+                var address = await db.Addresses.FindAsync(dto.AddressId);
+                if (address == null)
+                    return ApiResponse<OrderDto>.Failure("Address not found");
+
+                if (string.IsNullOrWhiteSpace(dto.PaymentMethod))
+                    return ApiResponse<OrderDto>.Failure("Payment method is required");
+
+                if (!Enum.TryParse<PaymentMethod>(dto.PaymentMethod, true, out var paymentMethod))
+                    return ApiResponse<OrderDto>.Failure($"Invalid payment method. Valid values: {string.Join(", ", Enum.GetNames<PaymentMethod>())}");
+
+                foreach (var item in cart.Items)
                 {
-                    ProductId = item.ProductId,
-                    Quantity = item.Quantity,
-                    UnitPrice = item.Product!.Price
-                });
-                item.Product.Stock -= item.Quantity;
+                    if (item.Product == null)
+                        return ApiResponse<OrderDto>.Failure($"Product with ID {item.ProductId} not found");
+
+                    if (item.Product.Stock < item.Quantity)
+                        return ApiResponse<OrderDto>.Failure($"Insufficient stock for product '{item.Product.Name}'. Available: {item.Product.Stock}, Requested: {item.Quantity}");
+                }
+
+                var order = new Order
+                {
+                    UserId = userId,
+                    AddressId = dto.AddressId,
+                    PaymentMethod = paymentMethod,
+                    TrackingCode = GenerateTrackingCode(),
+                    Status = OrderStatus.Pending
+                };
+
+                foreach (var item in cart.Items)
+                {
+                    order.Items.Add(new OrderItem
+                    {
+                        ProductId = item.ProductId,
+                        Quantity = item.Quantity,
+                        UnitPrice = item.Product!.Price
+                    });
+                    item.Product.Stock -= item.Quantity;
+                }
+
+                order.Total = order.Items.Sum(i => i.UnitPrice * i.Quantity);
+
+                db.Orders.Add(order);
+                db.CartItems.RemoveRange(cart.Items);
+                await db.SaveChangesAsync();
+
+                var user = await userManager.FindByIdAsync(userId);
+                if (user?.Email != null)
+                {
+                    try
+                    {
+                        await emailService.SendOrderConfirmationAsync(user.Email, user.FullName, order.Id, order.Total);
+                    }
+                    catch
+                    {
+                        // Email failed but order still created
+                    }
+                }
+
+                var createdOrder = await GetByIdAsync(order.Id, userId, "Customer");
+                return ApiResponse<OrderDto>.Success(createdOrder.Data!, "Order created successfully");
             }
-
-            order.Total = order.Items.Sum(i => i.UnitPrice * i.Quantity);
-
-            db.Orders.Add(order);
-            db.CartItems.RemoveRange(cart.Items);
-            await db.SaveChangesAsync();
-
-            // إرسال إيميل تأكيد
-            var user = await userManager.FindByIdAsync(userId);
-            if (user?.Email != null)
-                await emailService.SendOrderConfirmationAsync(user.Email, user.FullName, order.Id, order.Total);
-
-            return (await GetByIdAsync(order.Id, userId, "Customer"))!;
+            catch (Exception ex)
+            {
+                return ApiResponse<OrderDto>.Failure($"An error occurred while creating order: {ex.Message}");
+            }
         }
 
-        public async Task<List<OrderDto>> GetUserOrdersAsync(string userId)
+        public async Task<ApiResponse<List<OrderDto>>> GetUserOrdersAsync(string userId)
         {
-            var orders = await db.Orders
-                .Include(o => o.Items).ThenInclude(i => i.Product)
-                .Include(o => o.Address)
-                .Where(o => o.UserId == userId)
-                .OrderByDescending(o => o.CreatedAt)
-                .ToListAsync();
+            try
+            {
+                if (string.IsNullOrWhiteSpace(userId))
+                    return ApiResponse<List<OrderDto>>.Failure("User ID is required");
 
-            return orders.Select(MapToDto).ToList();
+                var orders = await db.Orders
+                    .Include(o => o.Items)
+                        .ThenInclude(i => i.Product)
+                    .Include(o => o.Address)
+                    .Where(o => o.UserId == userId)
+                    .OrderByDescending(o => o.CreatedAt)
+                    .ToListAsync();
+
+                if (!orders.Any())
+                    return ApiResponse<List<OrderDto>>.Success(new List<OrderDto>(), "No orders found");
+
+                var orderDtos = orders.Select(MapToDto).ToList();
+                return ApiResponse<List<OrderDto>>.Success(orderDtos, $"Successfully retrieved {orderDtos.Count} order(s)");
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<List<OrderDto>>.Failure($"An error occurred while retrieving orders: {ex.Message}");
+            }
         }
 
-        public async Task<OrderDto?> GetByIdAsync(int id, string userId, string role)
+        public async Task<ApiResponse<OrderDto>> GetByIdAsync(int id, string userId, string role)
         {
-            var order = await db.Orders
-                .Include(o => o.Items).ThenInclude(i => i.Product)
-                .Include(o => o.Address)
-                .FirstOrDefaultAsync(o => o.Id == id);
+            try
+            {
+                if (id <= 0)
+                    return ApiResponse<OrderDto>.Failure("Invalid order ID");
 
-            if (order == null) return null;
-            if (role == "Customer" && order.UserId != userId) return null;
+                if (string.IsNullOrWhiteSpace(userId))
+                    return ApiResponse<OrderDto>.Failure("User ID is required");
 
-            return MapToDto(order);
+                if (string.IsNullOrWhiteSpace(role))
+                    role = "Customer";
+
+                var order = await db.Orders
+                    .Include(o => o.Items)
+                        .ThenInclude(i => i.Product)
+                    .Include(o => o.Address)
+                    .FirstOrDefaultAsync(o => o.Id == id);
+
+                if (order == null)
+                    return ApiResponse<OrderDto>.Failure($"Order with ID {id} not found");
+
+                if (role == "Customer" && order.UserId != userId)
+                    return ApiResponse<OrderDto>.Failure("You don't have permission to view this order");
+
+                return ApiResponse<OrderDto>.Success(MapToDto(order), "Order retrieved successfully");
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<OrderDto>.Failure($"An error occurred while retrieving order: {ex.Message}");
+            }
         }
 
-        public async Task<bool> CancelAsync(int id, string userId)
+        public async Task<ApiResponse<bool>> CancelAsync(int id, string userId)
         {
-            var order = await db.Orders.Include(o => o.Items)
-                .ThenInclude(i => i.Product)
-                .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
+            try
+            {
+                if (id <= 0)
+                    return ApiResponse<bool>.Failure("Invalid order ID");
 
-            if (order == null || order.Status != OrderStatus.Pending) return false;
+                if (string.IsNullOrWhiteSpace(userId))
+                    return ApiResponse<bool>.Failure("User ID is required");
 
-            order.Status = OrderStatus.Cancelled;
+                var order = await db.Orders
+                    .Include(o => o.Items)
+                        .ThenInclude(i => i.Product)
+                    .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
 
-            // إرجاع الستوك
-            foreach (var item in order.Items)
-                if (item.Product != null) item.Product.Stock += item.Quantity;
+                if (order == null)
+                    return ApiResponse<bool>.Failure($"Order with ID {id} not found");
 
-            await db.SaveChangesAsync();
-            return true;
+                if (order.Status != OrderStatus.Pending)
+                    return ApiResponse<bool>.Failure($"Cannot cancel order with status '{order.Status}'. Only pending orders can be cancelled");
+
+                order.Status = OrderStatus.Cancelled;
+
+                foreach (var item in order.Items)
+                {
+                    if (item.Product != null)
+                        item.Product.Stock += item.Quantity;
+                }
+
+                await db.SaveChangesAsync();
+                return ApiResponse<bool>.Success(true, "Order cancelled successfully");
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<bool>.Failure($"An error occurred while cancelling order: {ex.Message}");
+            }
         }
 
-        public async Task<bool> UpdateStatusAsync(int id, string status)
+        public async Task<ApiResponse<bool>> UpdateStatusAsync(int id, string status, string adminId)
         {
-            var order = await db.Orders.FindAsync(id);
-            if (order == null) return false;
+            try
+            {
+                if (id <= 0)
+                    return ApiResponse<bool>.Failure("Invalid order ID");
 
-            order.Status = Enum.Parse<OrderStatus>(status);
-            await db.SaveChangesAsync();
-            return true;
+                if (string.IsNullOrWhiteSpace(status))
+                    return ApiResponse<bool>.Failure("Status is required");
+
+                if (string.IsNullOrWhiteSpace(adminId))
+                    return ApiResponse<bool>.Failure("Admin ID is required");
+
+                if (!Enum.TryParse<OrderStatus>(status, true, out var orderStatus))
+                    return ApiResponse<bool>.Failure($"Invalid status. Valid values: {string.Join(", ", Enum.GetNames<OrderStatus>())}");
+
+                var order = await db.Orders.FindAsync(id);
+                if (order == null)
+                    return ApiResponse<bool>.Failure($"Order with ID {id} not found");
+
+                if (order.Status == OrderStatus.Cancelled)
+                    return ApiResponse<bool>.Failure("Cannot update status of a cancelled order");
+
+                if (order.Status == OrderStatus.Delivered)
+                    return ApiResponse<bool>.Failure("Cannot update status of a delivered order");
+
+                order.Status = orderStatus;
+                await db.SaveChangesAsync();
+
+                return ApiResponse<bool>.Success(true, $"Order status updated to {orderStatus}");
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<bool>.Failure($"An error occurred while updating order status: {ex.Message}");
+            }
+        }
+
+        public async Task<ApiResponse<List<OrderDto>>> GetAllOrdersAsync(string adminId)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(adminId))
+                    return ApiResponse<List<OrderDto>>.Failure("Admin ID is required");
+
+                var orders = await db.Orders
+                    .Include(o => o.Items)
+                        .ThenInclude(i => i.Product)
+                    .Include(o => o.Address)
+                    .Include(o => o.User)
+                    .OrderByDescending(o => o.CreatedAt)
+                    .ToListAsync();
+
+                if (!orders.Any())
+                    return ApiResponse<List<OrderDto>>.Success(new List<OrderDto>(), "No orders found");
+
+                var orderDtos = orders.Select(MapToDto).ToList();
+                return ApiResponse<List<OrderDto>>.Success(orderDtos, $"Successfully retrieved {orderDtos.Count} order(s)");
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<List<OrderDto>>.Failure($"An error occurred while retrieving all orders: {ex.Message}");
+            }
+        }
+
+        private static string GenerateTrackingCode()
+        {
+            return Guid.NewGuid().ToString("N")[..10].ToUpper();
         }
 
         private static OrderDto MapToDto(Order o)
@@ -130,18 +268,20 @@ namespace ECommerceApi.Services.Implementations
                 CreatedAt = o.CreatedAt,
                 Address = new AddressSnapshotDto
                 {
-                    Street = o.Address?.Street ?? "",
-                    City = o.Address?.City ?? "",
-                    Country = o.Address?.Country ?? ""
+                    Street = o.Address?.Street ?? string.Empty,
+                    City = o.Address?.City ?? string.Empty,
+                    Country = o.Address?.Country ?? string.Empty
                 },
                 Items = o.Items.Select(i =>
                 {
-                    var images = string.IsNullOrEmpty(i.Product?.ImageUrls) ? [] :
-                        JsonSerializer.Deserialize<List<string>>(i.Product.ImageUrls) ?? [];
+                    var images = string.IsNullOrEmpty(i.Product?.ImageUrls)
+                        ? new List<string>()
+                        : JsonSerializer.Deserialize<List<string>>(i.Product.ImageUrls) ?? new List<string>();
+
                     return new OrderItemDto
                     {
                         ProductId = i.ProductId,
-                        ProductName = i.Product?.Name ?? "",
+                        ProductName = i.Product?.Name ?? string.Empty,
                         ImageUrl = images.FirstOrDefault(),
                         Quantity = i.Quantity,
                         UnitPrice = i.UnitPrice,
@@ -151,5 +291,4 @@ namespace ECommerceApi.Services.Implementations
             };
         }
     }
-
 }

@@ -1,55 +1,314 @@
-﻿//using ECommerceApi.Services.DTOs.Common;
-//using ECommerceApi.Services.DTOs.User;
-//using ECommerceApi.Services.Interfaces;
-//using Microsoft.AspNetCore.Authorization;
-//using Microsoft.AspNetCore.Mvc;
-//using System.Security.Claims;
+﻿using ECommerceApi.Services.DTOs.Common;
+using ECommerceApi.Services.DTOs.User;
+using ECommerceApi.Services.Interfaces;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
-//namespace ECommerceApi.API.Controllers
-//{
-//    [ApiController]
-//    [Route("api/v1/users")]
-//    [Authorize]
-//    public class UsersController(IUserService userService) : ControllerBase
-//    {
-//        private string UserId => User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+namespace ECommerceApi.API.Controllers
+{
+    [ApiController]
+    [Route("api/v1/user")]
+    [Authorize]
+    public class UserController(IUserService userService) : ControllerBase
+    {
+        private string GetUserId()
+        {
+            return User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        }
 
-//        [HttpGet("me")]
-//        public async Task<IActionResult> GetProfile()
-//        {
-//            var profile = await userService.GetProfileAsync(UserId);
-//            if (profile == null) return NotFound(ApiResponse<string>.Fail("المستخدم غير موجود"));
-//            return Ok(ApiResponse<UserProfileDto>.Ok(profile));
-//        }
+        [HttpGet("profile")]
+        public async Task<IActionResult> GetProfile()
+        {
+            var userId = GetUserId();
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = "User not authenticated"
+                });
+            }
 
-//        [HttpPut("me")]
-//        public async Task<IActionResult> UpdateProfile(UpdateProfileDto dto)
-//        {
-//            var result = await userService.UpdateProfileAsync(UserId, dto);
-//            if (!result) return BadRequest(ApiResponse<string>.Fail("فشل التحديث"));
-//            return Ok(ApiResponse<string>.Ok("تم التحديث بنجاح"));
-//        }
+            var result = await userService.GetProfileAsync(userId);
 
-//        [HttpGet("me/addresses")]
-//        public async Task<IActionResult> GetAddresses()
-//        {
-//            var addresses = await userService.GetAddressesAsync(UserId);
-//            return Ok(ApiResponse<List<AddressDto>>.Ok(addresses));
-//        }
+            if (!result.IsSuccess)
+            {
+                if (result.Errors != null && result.Errors.Any())
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Failed to retrieve profile",
+                        errors = result.Errors
+                    });
+                }
 
-//        [HttpPost("me/addresses")]
-//        public async Task<IActionResult> AddAddress(CreateAddressDto dto)
-//        {
-//            var address = await userService.AddAddressAsync(UserId, dto);
-//            return CreatedAtAction(nameof(GetAddresses), ApiResponse<AddressDto>.Ok(address, "تم إضافة العنوان"));
-//        }
+                return NotFound(new
+                {
+                    success = false,
+                    message = result.ErrorMessage
+                });
+            }
 
-//        [HttpDelete("me/addresses/{id}")]
-//        public async Task<IActionResult> DeleteAddress(int id)
-//        {
-//            var result = await userService.DeleteAddressAsync(UserId, id);
-//            if (!result) return NotFound(ApiResponse<string>.Fail("العنوان غير موجود"));
-//            return Ok(ApiResponse<string>.Ok("تم حذف العنوان"));
-//        }
-//    }
-//}
+            return Ok(new
+            {
+                success = true,
+                message = result.Message,
+                data = result.Data
+            });
+        }
+
+        [HttpPut("profile")]
+        public async Task<IActionResult> UpdateProfile([FromBody] UpdateProfileDto dto)
+        {
+            var userId = GetUserId();
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = "User not authenticated"
+                });
+            }
+
+            var result = await userService.UpdateProfileAsync(userId, dto);
+
+            if (!result.IsSuccess)
+            {
+                if (result.Errors != null && result.Errors.Any())
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Failed to update profile",
+                        errors = result.Errors
+                    });
+                }
+
+                return BadRequest(new
+                {
+                    success = false,
+                    message = result.ErrorMessage
+                });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = result.Message,
+                data = result.Data
+            });
+        }
+
+        [HttpGet("addresses")]
+        public async Task<IActionResult> GetAddresses()
+        {
+            var userId = GetUserId();
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = "User not authenticated"
+                });
+            }
+
+            var result = await userService.GetAddressesAsync(userId);
+
+            if (!result.IsSuccess)
+            {
+                if (result.Errors != null && result.Errors.Any())
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Failed to retrieve addresses",
+                        errors = result.Errors
+                    });
+                }
+
+                return BadRequest(new
+                {
+                    success = false,
+                    message = result.ErrorMessage
+                });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = result.Message,
+                data = result.Data
+            });
+        }
+
+        [HttpPost("addresses")]
+        public async Task<IActionResult> AddAddress([FromBody] CreateAddressDto dto)
+        {
+            var userId = GetUserId();
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = "User not authenticated"
+                });
+            }
+
+            var result = await userService.AddAddressAsync(userId, dto);
+
+            if (!result.IsSuccess)
+            {
+                if (result.Errors != null && result.Errors.Any())
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Failed to add address",
+                        errors = result.Errors
+                    });
+                }
+
+                return BadRequest(new
+                {
+                    success = false,
+                    message = result.ErrorMessage
+                });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = result.Message,
+                data = result.Data
+            });
+        }
+
+        [HttpPut("addresses/{addressId}")]
+        public async Task<IActionResult> UpdateAddress(int addressId, [FromBody] CreateAddressDto dto)
+        {
+            var userId = GetUserId();
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = "User not authenticated"
+                });
+            }
+
+            var result = await userService.UpdateAddressAsync(userId, addressId, dto);
+
+            if (!result.IsSuccess)
+            {
+                if (result.Errors != null && result.Errors.Any())
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Failed to update address",
+                        errors = result.Errors
+                    });
+                }
+
+                return BadRequest(new
+                {
+                    success = false,
+                    message = result.ErrorMessage
+                });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = result.Message,
+                data = result.Data
+            });
+        }
+
+        [HttpDelete("addresses/{addressId}")]
+        public async Task<IActionResult> DeleteAddress(int addressId)
+        {
+            var userId = GetUserId();
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = "User not authenticated"
+                });
+            }
+
+            var result = await userService.DeleteAddressAsync(userId, addressId);
+
+            if (!result.IsSuccess)
+            {
+                if (result.Errors != null && result.Errors.Any())
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Failed to delete address",
+                        errors = result.Errors
+                    });
+                }
+
+                return NotFound(new
+                {
+                    success = false,
+                    message = result.ErrorMessage
+                });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = result.Message,
+                data = result.Data
+            });
+        }
+
+        [HttpPatch("addresses/{addressId}/default")]
+        public async Task<IActionResult> SetDefaultAddress(int addressId)
+        {
+            var userId = GetUserId();
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = "User not authenticated"
+                });
+            }
+
+            var result = await userService.SetDefaultAddressAsync(userId, addressId);
+
+            if (!result.IsSuccess)
+            {
+                if (result.Errors != null && result.Errors.Any())
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Failed to set default address",
+                        errors = result.Errors
+                    });
+                }
+
+                return NotFound(new
+                {
+                    success = false,
+                    message = result.ErrorMessage
+                });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = result.Message,
+                data = result.Data
+            });
+        }
+    }
+}

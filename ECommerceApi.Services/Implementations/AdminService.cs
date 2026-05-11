@@ -126,13 +126,11 @@ namespace ECommerceApi.Services.Implementations
         {
             try
             {
-                // Validation: Check if database context is available
                 if (db == null)
                 {
                     return ApiResponse<List<OrderDto>>.Failure("Database context is not available");
                 }
 
-                // Get all orders with their related data
                 var orders = await db.Orders
                     .Include(o => o.Items)
                         .ThenInclude(i => i.Product)
@@ -141,7 +139,6 @@ namespace ECommerceApi.Services.Implementations
                     .OrderByDescending(o => o.CreatedAt)
                     .ToListAsync();
 
-                // Validation: Check if any orders exist
                 if (!orders.Any())
                 {
                     return ApiResponse<List<OrderDto>>.Success(
@@ -149,26 +146,24 @@ namespace ECommerceApi.Services.Implementations
                         "No orders found");
                 }
 
-                // Map orders to DTOs
                 var orderDtos = new List<OrderDto>();
                 foreach (var order in orders)
                 {
-                    var orderDto = await orderService.GetByIdAsync(order.Id, "", "Admin");
-                    if (orderDto != null)
+                    var result = await orderService.GetByIdAsync(order.Id, "", "Admin");
+                    if (result.IsSuccess && result.Data != null)
                     {
-                        orderDtos.Add(orderDto);
+                        orderDtos.Add(result.Data);
                     }
                 }
 
-                // Validation: Check if any orders were successfully mapped
                 if (!orderDtos.Any())
                 {
-                    return ApiResponse<List<OrderDto>>.Failure(
-                        "Failed to retrieve order details");
+                    return ApiResponse<List<OrderDto>>.Failure("Failed to retrieve order details");
                 }
 
                 return ApiResponse<List<OrderDto>>.Success(
-                    orderDtos);
+                    orderDtos,
+                    $"Successfully retrieved {orderDtos.Count} order(s)");
             }
             catch (Exception ex)
             {

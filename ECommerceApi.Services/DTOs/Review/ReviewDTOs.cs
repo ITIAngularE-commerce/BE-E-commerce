@@ -1,23 +1,33 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace ECommerceApi.Services.DTOs.Review
+﻿namespace ECommerceApi.Services.DTOs.Review
 {
+    public class CreateReviewDto
+    {
+        public int Rating { get; set; }
+        public string Comment { get; set; } = string.Empty;
+    }
+
+    public class UpdateReviewDto
+    {
+        public int? Rating { get; set; }
+        public string? Comment { get; set; }
+    }
+
     public class ReviewDto
     {
         public int Id { get; set; }
+        public string UserId { get; set; } = string.Empty;
         public string UserName { get; set; } = string.Empty;
         public int Rating { get; set; }
-        public string? Comment { get; set; }
+        public string Comment { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
+        public string? ProductName { get; set; }
+        public int? ProductId { get; set; }
     }
 
-    public class CreateReviewDto
+    public class AverageRatingDto
     {
-        public int Rating { get; set; }   // 1-5
-        public string? Comment { get; set; }
+        public double AverageRating { get; set; }
+        public int TotalReviews { get; set; }
+        public Dictionary<int, int> RatingDistribution { get; set; } = new();
     }
 }

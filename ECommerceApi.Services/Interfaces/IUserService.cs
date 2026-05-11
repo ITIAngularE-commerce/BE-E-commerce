@@ -9,11 +9,13 @@ namespace ECommerceApi.Services.Interfaces
 {
     public interface IUserService
     {
-        Task<UserProfileDto?> GetProfileAsync(string userId);
-        Task<bool> UpdateProfileAsync(string userId, UpdateProfileDto dto);
-        Task<List<AddressDto>> GetAddressesAsync(string userId);
-        Task<AddressDto> AddAddressAsync(string userId, CreateAddressDto dto);
-        Task<bool> DeleteAddressAsync(string userId, int addressId);
+        Task<ApiResponse<UserProfileDto>> GetProfileAsync(string userId);
+        Task<ApiResponse<bool>> UpdateProfileAsync(string userId, UpdateProfileDto dto);
+        Task<ApiResponse<List<AddressDto>>> GetAddressesAsync(string userId);
+        Task<ApiResponse<AddressDto>> AddAddressAsync(string userId, CreateAddressDto dto);
+        Task<ApiResponse<bool>> UpdateAddressAsync(string userId, int addressId, CreateAddressDto dto);
+        Task<ApiResponse<bool>> DeleteAddressAsync(string userId, int addressId);
+        Task<ApiResponse<AddressDto>> SetDefaultAddressAsync(string userId, int addressId);
     }
 
 }

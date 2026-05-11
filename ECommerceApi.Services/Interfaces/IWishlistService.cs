@@ -1,16 +1,13 @@
-﻿using ECommerceApi.Services.DTOs.Product;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
+﻿
 namespace ECommerceApi.Services.Interfaces
 {
     public interface IWishlistService
     {
-        Task<List<ProductDto>> GetWishlistAsync(string userId);
-        Task<bool> ToggleAsync(string userId, int productId);
+        Task<ApiResponse<List<ProductDto>>> GetWishlistAsync(string userId);
+        Task<ApiResponse<bool>> ToggleAsync(string userId, int productId);
+        Task<ApiResponse<bool>> IsInWishlistAsync(string userId, int productId);
+        Task<ApiResponse<int>> GetWishlistCountAsync(string userId);
+        Task<ApiResponse<bool>> ClearWishlistAsync(string userId);
     }
 
 }
