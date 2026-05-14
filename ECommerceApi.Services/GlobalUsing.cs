@@ -23,3 +23,8 @@ global using Microsoft.AspNetCore.Http;
 global using CloudinaryDotNet;
 global using CloudinaryDotNet.Actions;
 global using ECommerceApi.Services.DTOs.Review;
+global using ECommerceApi.Services.DTOs.Payment;
+global using System.Net.Http.Json;
+global using Microsoft.Extensions.Logging;
+global using Microsoft.Extensions.Options;
+global using System.Text.Json.Serialization;

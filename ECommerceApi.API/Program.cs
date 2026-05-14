@@ -1,8 +1,10 @@
 ﻿using System.Text;
 using ECommerceApi.Data;
 using ECommerceApi.Data.Models;
+using ECommerceApi.Services.DTOs.Payment;
 using ECommerceApi.Services.Implementations;
 using ECommerceApi.Services.Interfaces;
+using ECommerceApi.Services.Paymop;
 using Google;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
@@ -73,14 +75,20 @@ builder.Services.AddScoped<IAdminService, AdminService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<IImageService, ImageService>();
 
-// ── Controllers + Swagger ───────────────────────────────────
+builder.Services.Configure<PaymobSettings>(
+    builder.Configuration.GetSection("Paymob"));
+
+builder.Services.AddHttpClient();
+
+builder.Services.AddScoped<IPaymobService, PaymobService>();
+builder.Services.AddScoped<IPaymentService, PaymentService>();
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "ECommerce API", Version = "v1" });
 
-    // إضافة JWT support في Swagger
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Name = "Authorization",
@@ -134,7 +142,6 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// ── Seed Roles ──────────────────────────────────────────────
 using (var scope = app.Services.CreateScope())
 {
     var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();

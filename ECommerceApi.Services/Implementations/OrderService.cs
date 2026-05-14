@@ -81,6 +81,17 @@ namespace ECommerceApi.Services.Implementations
                 }
 
                 var createdOrder = await GetByIdAsync(order.Id, userId, "Customer");
+                if (paymentMethod == PaymentMethod.CreditCard)
+                {
+                    db.Payments.Add(new Payment
+                    {
+                        OrderId = order.Id,
+                        Provider = "COD",
+                        Amount = order.Total,
+                        Status = PaymentStatus.Pending
+                    });
+                    await db.SaveChangesAsync();
+                }
                 return ApiResponse<OrderDto>.Success(createdOrder.Data!, "Order created successfully");
             }
             catch (Exception ex)
