@@ -1,9 +1,25 @@
 ﻿
 namespace ECommerceApi.Services.Implementations
 {
-    public class OrderService(AppDbContext db, IEmailService emailService,
-        UserManager<ApplicationUser> userManager) : IOrderService
+    public class OrderService : IOrderService
     {
+        private readonly AppDbContext _db;
+        private readonly IEmailService _emailService;
+        private readonly UserManager<ApplicationUser> _userManager;
+        private readonly ILogger<OrderService> _logger;
+
+        public OrderService(
+            AppDbContext db,
+            IEmailService emailService,
+            UserManager<ApplicationUser> userManager,
+            ILogger<OrderService> logger)
+        {
+            _db = db;
+            _emailService = emailService;
+            _userManager = userManager;
+            _logger = logger;
+        }
+
         public async Task<ApiResponse<OrderDto>> CreateAsync(string userId, CreateOrderDto dto)
         {
             try
@@ -11,7 +27,7 @@ namespace ECommerceApi.Services.Implementations
                 if (string.IsNullOrWhiteSpace(userId))
                     return ApiResponse<OrderDto>.Failure("User ID is required");
 
-                var cart = await db.Carts
+                var cart = await _db.Carts
                     .Include(c => c.Items)
                     .ThenInclude(i => i.Product)
                     .FirstOrDefaultAsync(c => c.UserId == userId);
@@ -22,7 +38,7 @@ namespace ECommerceApi.Services.Implementations
                 if (dto.AddressId <= 0)
                     return ApiResponse<OrderDto>.Failure("Valid address ID is required");
 
-                var address = await db.Addresses.FindAsync(dto.AddressId);
+                var address = await _db.Addresses.FindAsync(dto.AddressId);
                 if (address == null)
                     return ApiResponse<OrderDto>.Failure("Address not found");
 
@@ -63,40 +79,167 @@ namespace ECommerceApi.Services.Implementations
 
                 order.Total = order.Items.Sum(i => i.UnitPrice * i.Quantity);
 
-                db.Orders.Add(order);
-                db.CartItems.RemoveRange(cart.Items);
-                await db.SaveChangesAsync();
+                _db.Orders.Add(order);
+                _db.CartItems.RemoveRange(cart.Items);
+                await _db.SaveChangesAsync();
 
-                var user = await userManager.FindByIdAsync(userId);
-                if (user?.Email != null)
+                // ✅ Send order confirmation email
+                var user = await _userManager.FindByIdAsync(userId);
+                if (user?.Email != null && user.EmailConfirmed)
                 {
                     try
                     {
-                        await emailService.SendOrderConfirmationAsync(user.Email, user.FullName, order.Id, order.Total);
+                        await _emailService.SendOrderConfirmationAsync(user.Email, user.FullName, order.Id, order.Total);
+                        _logger.LogInformation("Order confirmation email sent to {Email}", user.Email);
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        // Email failed but order still created
+                        _logger.LogError(ex, "Failed to send order confirmation email to {Email}", user.Email);
                     }
                 }
 
-                var createdOrder = await GetByIdAsync(order.Id, userId, "Customer");
                 if (paymentMethod == PaymentMethod.CreditCard)
                 {
-                    db.Payments.Add(new Payment
+                    _db.Payments.Add(new Payment
                     {
                         OrderId = order.Id,
                         Provider = "COD",
                         Amount = order.Total,
                         Status = PaymentStatus.Pending
                     });
-                    await db.SaveChangesAsync();
+                    await _db.SaveChangesAsync();
                 }
+
+                var createdOrder = await GetByIdAsync(order.Id, userId, "Customer");
                 return ApiResponse<OrderDto>.Success(createdOrder.Data!, "Order created successfully");
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "Error creating order for user {UserId}", userId);
                 return ApiResponse<OrderDto>.Failure($"An error occurred while creating order: {ex.Message}");
+            }
+        }
+
+        public async Task<ApiResponse<bool>> UpdateStatusAsync(int id, string status, string adminId)
+        {
+            try
+            {
+                if (id <= 0)
+                    return ApiResponse<bool>.Failure("Invalid order ID");
+
+                if (string.IsNullOrWhiteSpace(status))
+                    return ApiResponse<bool>.Failure("Status is required");
+
+                if (string.IsNullOrWhiteSpace(adminId))
+                    return ApiResponse<bool>.Failure("Admin ID is required");
+
+                if (!Enum.TryParse<OrderStatus>(status, true, out var orderStatus))
+                    return ApiResponse<bool>.Failure($"Invalid status. Valid values: {string.Join(", ", Enum.GetNames<OrderStatus>())}");
+
+                var order = await _db.Orders
+                    .Include(o => o.User)
+                    .FirstOrDefaultAsync(o => o.Id == id);
+
+                if (order == null)
+                    return ApiResponse<bool>.Failure($"Order with ID {id} not found");
+
+                var oldStatus = order.Status.ToString();
+
+                if (order.Status == OrderStatus.Cancelled)
+                    return ApiResponse<bool>.Failure("Cannot update status of a cancelled order");
+
+                if (order.Status == OrderStatus.Delivered)
+                    return ApiResponse<bool>.Failure("Cannot update status of a delivered order");
+
+                order.Status = orderStatus;
+                await _db.SaveChangesAsync();
+
+                // ✅ Send status update email
+                if (order.User?.Email != null && order.User.EmailConfirmed)
+                {
+                    try
+                    {
+                        await _emailService.SendOrderStatusUpdateAsync(
+                            order.User.Email,
+                            order.User.FullName,
+                            order.Id,
+                            oldStatus,
+                            order.Status.ToString()
+                        );
+                        _logger.LogInformation("Order status update email sent to {Email} for order {OrderId}", order.User.Email, order.Id);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to send status update email to {Email}", order.User.Email);
+                    }
+                }
+
+                return ApiResponse<bool>.Success(true, $"Order status updated from {oldStatus} to {orderStatus}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating order {OrderId} status", id);
+                return ApiResponse<bool>.Failure($"An error occurred while updating order status: {ex.Message}");
+            }
+        }
+
+        public async Task<ApiResponse<bool>> CancelAsync(int id, string userId)
+        {
+            try
+            {
+                if (id <= 0)
+                    return ApiResponse<bool>.Failure("Invalid order ID");
+
+                if (string.IsNullOrWhiteSpace(userId))
+                    return ApiResponse<bool>.Failure("User ID is required");
+
+                var order = await _db.Orders
+                    .Include(o => o.Items)
+                        .ThenInclude(i => i.Product)
+                    .Include(o => o.User)
+                    .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
+
+                if (order == null)
+                    return ApiResponse<bool>.Failure($"Order with ID {id} not found");
+
+                if (order.Status != OrderStatus.Pending)
+                    return ApiResponse<bool>.Failure($"Cannot cancel order with status '{order.Status}'. Only pending orders can be cancelled");
+
+                order.Status = OrderStatus.Cancelled;
+
+                foreach (var item in order.Items)
+                {
+                    if (item.Product != null)
+                        item.Product.Stock += item.Quantity;
+                }
+
+                await _db.SaveChangesAsync();
+
+                if (order.User?.Email != null && order.User.EmailConfirmed)
+                {
+                    try
+                    {
+                        await _emailService.SendOrderStatusUpdateAsync(
+                            order.User.Email,
+                            order.User.FullName,
+                            order.Id,
+                            "Pending",
+                            "Cancelled"
+                        );
+                        _logger.LogInformation("Order cancellation email sent to {Email} for order {OrderId}", order.User.Email, order.Id);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to send cancellation email to {Email}", order.User.Email);
+                    }
+                }
+
+                return ApiResponse<bool>.Success(true, "Order cancelled successfully");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error cancelling order {OrderId}", id);
+                return ApiResponse<bool>.Failure($"An error occurred while cancelling order: {ex.Message}");
             }
         }
 
@@ -107,7 +250,7 @@ namespace ECommerceApi.Services.Implementations
                 if (string.IsNullOrWhiteSpace(userId))
                     return ApiResponse<List<OrderDto>>.Failure("User ID is required");
 
-                var orders = await db.Orders
+                var orders = await _db.Orders
                     .Include(o => o.Items)
                         .ThenInclude(i => i.Product)
                     .Include(o => o.Address)
@@ -140,7 +283,7 @@ namespace ECommerceApi.Services.Implementations
                 if (string.IsNullOrWhiteSpace(role))
                     role = "Customer";
 
-                var order = await db.Orders
+                var order = await _db.Orders
                     .Include(o => o.Items)
                         .ThenInclude(i => i.Product)
                     .Include(o => o.Address)
@@ -160,81 +303,6 @@ namespace ECommerceApi.Services.Implementations
             }
         }
 
-        public async Task<ApiResponse<bool>> CancelAsync(int id, string userId)
-        {
-            try
-            {
-                if (id <= 0)
-                    return ApiResponse<bool>.Failure("Invalid order ID");
-
-                if (string.IsNullOrWhiteSpace(userId))
-                    return ApiResponse<bool>.Failure("User ID is required");
-
-                var order = await db.Orders
-                    .Include(o => o.Items)
-                        .ThenInclude(i => i.Product)
-                    .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
-
-                if (order == null)
-                    return ApiResponse<bool>.Failure($"Order with ID {id} not found");
-
-                if (order.Status != OrderStatus.Pending)
-                    return ApiResponse<bool>.Failure($"Cannot cancel order with status '{order.Status}'. Only pending orders can be cancelled");
-
-                order.Status = OrderStatus.Cancelled;
-
-                foreach (var item in order.Items)
-                {
-                    if (item.Product != null)
-                        item.Product.Stock += item.Quantity;
-                }
-
-                await db.SaveChangesAsync();
-                return ApiResponse<bool>.Success(true, "Order cancelled successfully");
-            }
-            catch (Exception ex)
-            {
-                return ApiResponse<bool>.Failure($"An error occurred while cancelling order: {ex.Message}");
-            }
-        }
-
-        public async Task<ApiResponse<bool>> UpdateStatusAsync(int id, string status, string adminId)
-        {
-            try
-            {
-                if (id <= 0)
-                    return ApiResponse<bool>.Failure("Invalid order ID");
-
-                if (string.IsNullOrWhiteSpace(status))
-                    return ApiResponse<bool>.Failure("Status is required");
-
-                if (string.IsNullOrWhiteSpace(adminId))
-                    return ApiResponse<bool>.Failure("Admin ID is required");
-
-                if (!Enum.TryParse<OrderStatus>(status, true, out var orderStatus))
-                    return ApiResponse<bool>.Failure($"Invalid status. Valid values: {string.Join(", ", Enum.GetNames<OrderStatus>())}");
-
-                var order = await db.Orders.FindAsync(id);
-                if (order == null)
-                    return ApiResponse<bool>.Failure($"Order with ID {id} not found");
-
-                if (order.Status == OrderStatus.Cancelled)
-                    return ApiResponse<bool>.Failure("Cannot update status of a cancelled order");
-
-                if (order.Status == OrderStatus.Delivered)
-                    return ApiResponse<bool>.Failure("Cannot update status of a delivered order");
-
-                order.Status = orderStatus;
-                await db.SaveChangesAsync();
-
-                return ApiResponse<bool>.Success(true, $"Order status updated to {orderStatus}");
-            }
-            catch (Exception ex)
-            {
-                return ApiResponse<bool>.Failure($"An error occurred while updating order status: {ex.Message}");
-            }
-        }
-
         public async Task<ApiResponse<List<OrderDto>>> GetAllOrdersAsync(string adminId)
         {
             try
@@ -242,7 +310,7 @@ namespace ECommerceApi.Services.Implementations
                 if (string.IsNullOrWhiteSpace(adminId))
                     return ApiResponse<List<OrderDto>>.Failure("Admin ID is required");
 
-                var orders = await db.Orders
+                var orders = await _db.Orders
                     .Include(o => o.Items)
                         .ThenInclude(i => i.Product)
                     .Include(o => o.Address)

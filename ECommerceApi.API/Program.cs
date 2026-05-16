@@ -1,10 +1,10 @@
 ﻿using System.Text;
 using ECommerceApi.Data;
 using ECommerceApi.Data.Models;
+using ECommerceApi.Services.DTOs.Common;
 using ECommerceApi.Services.DTOs.Payment;
 using ECommerceApi.Services.Implementations;
 using ECommerceApi.Services.Interfaces;
-using ECommerceApi.Services.Paymop;
 using Google;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
@@ -61,6 +61,8 @@ builder.Services.AddCors(options =>
               .AllowCredentials();
     });
 });
+
+builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("EmailSettings"));
 
 // ── Services DI ─────────────────────────────────────────────
 builder.Services.AddScoped<IAuthService, AuthService>();
