@@ -7,7 +7,7 @@ namespace ECommerceApi.API.Controllers
 {
     [ApiController]
     [Route("api/v1/auth")]
-    public class AuthController(IAuthService authService) : ControllerBase
+    public class AuthController(IAuthService authService, IConfiguration _config) : ControllerBase
     {
         [HttpPost("register")]
         public async Task<IActionResult> Register(RegisterDto dto)
@@ -21,7 +21,7 @@ namespace ECommerceApi.API.Controllers
                     return BadRequest(new
                     {
                         success = false,
-                        message = "فشل التسجيل",
+                        message = "Registration failed",
                         errors = result.Errors
                     });
                 }
@@ -36,7 +36,7 @@ namespace ECommerceApi.API.Controllers
             return Ok(new
             {
                 success = true,
-                message = "تم التسجيل بنجاح",
+                message = "Registration successful",
                 data = result.Data
             });
         }
@@ -53,7 +53,7 @@ namespace ECommerceApi.API.Controllers
                     return Unauthorized(new
                     {
                         success = false,
-                        message = "فشل تسجيل الدخول",
+                        message = "Login failed",
                         errors = result.Errors
                     });
                 }
@@ -68,7 +68,7 @@ namespace ECommerceApi.API.Controllers
             return Ok(new
             {
                 success = true,
-                message = "تم تسجيل الدخول بنجاح",
+                message = "Login successful",
                 data = result.Data
             });
         }
@@ -85,7 +85,7 @@ namespace ECommerceApi.API.Controllers
                     return Unauthorized(new
                     {
                         success = false,
-                        message = "فشل تسجيل الدخول بواسطة Google",
+                        message = "Google login failed",
                         errors = result.Errors
                     });
                 }
@@ -100,7 +100,7 @@ namespace ECommerceApi.API.Controllers
             return Ok(new
             {
                 success = true,
-                message = "تم تسجيل الدخول بنجاح",
+                message = "Login successful",
                 data = result.Data
             });
         }
@@ -108,6 +108,36 @@ namespace ECommerceApi.API.Controllers
         [HttpGet("confirm-email")]
         public async Task<IActionResult> ConfirmEmail([FromQuery] string userId, [FromQuery] string token)
         {
+            if (string.IsNullOrEmpty(userId))
+            {
+                var fullQuery = Request.QueryString.ToString();
+
+                var userIdMatch = System.Text.RegularExpressions.Regex.Match(fullQuery, @"userId[=:]?([a-fA-F0-9-]+)");
+                if (userIdMatch.Success)
+                {
+                    userId = userIdMatch.Groups[1].Value;
+                }
+            }
+
+            if (string.IsNullOrEmpty(token))
+            {
+                var fullQuery = Request.QueryString.ToString();
+                var tokenMatch = System.Text.RegularExpressions.Regex.Match(fullQuery, @"token[=:]?([^&]+)");
+                if (tokenMatch.Success)
+                {
+                    token = Uri.UnescapeDataString(tokenMatch.Groups[1].Value);
+                }
+            }
+
+            if (string.IsNullOrEmpty(userId) || string.IsNullOrEmpty(token))
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "Invalid confirmation link. Missing userId or token."
+                });
+            }
+
             var result = await authService.ConfirmEmailAsync(userId, token);
 
             if (!result.IsSuccess)
@@ -117,7 +147,7 @@ namespace ECommerceApi.API.Controllers
                     return BadRequest(new
                     {
                         success = false,
-                        message = "فشل تأكيد البريد الإلكتروني",
+                        message = "Email confirmation failed",
                         errors = result.Errors
                     });
                 }
@@ -125,14 +155,19 @@ namespace ECommerceApi.API.Controllers
                 return BadRequest(new
                 {
                     success = false,
-                    message = result.ErrorMessage
+                    message = result.ErrorMessage ?? "Email confirmation failed"
                 });
             }
 
             return Ok(new
             {
                 success = true,
-                message = result.Data
+                message = result.Message ?? "Email confirmed successfully",
+                data = new
+                {
+                    emailConfirmed = true,
+                    redirectUrl = $"{_config["FrontendUrl"]}/login"
+                }
             });
         }
     }

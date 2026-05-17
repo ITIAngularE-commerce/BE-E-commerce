@@ -8,18 +8,17 @@ namespace ECommerceApi.Services.Implementations
     {
         public async Task<ApiResponse<AuthResponseDto>> RegisterAsync(RegisterDto dto)
         {
-            // 1. Check if email already exists
             var existing = await userManager.FindByEmailAsync(dto.Email);
             if (existing != null)
-                return ApiResponse<AuthResponseDto>.Failure("البريد الإلكتروني مسجل بالفعل");
+                return ApiResponse<AuthResponseDto>.Failure("Email is already registered");
 
-            // 2. Create new user
             var user = new ApplicationUser
             {
                 FullName = dto.FullName,
                 Email = dto.Email,
                 UserName = dto.Email,
-                PhoneNumber = dto.PhoneNumber
+                PhoneNumber = dto.PhoneNumber,
+                EmailConfirmed = false
             };
 
             var result = await userManager.CreateAsync(user, dto.Password);
@@ -29,52 +28,44 @@ namespace ECommerceApi.Services.Implementations
                 return ApiResponse<AuthResponseDto>.Failure(errors);
             }
 
-            // 3. Add role
             var role = dto.Role is "Seller" or "Admin" ? dto.Role : "Customer";
             await userManager.AddToRoleAsync(user, role);
 
-            // 4. Send email confirmation (optional - don't fail registration if email fails)
             var token = await userManager.GenerateEmailConfirmationTokenAsync(user);
-            var link = $"https://localhost:7001/api/v1/auth/confirm-email?userId={user.Id}&token={Uri.EscapeDataString(token)}";
+            var confirmationLink = $"{config["AppUrl"]}/api/v1/auth/confirm-email?userId={user.Id}&token={Uri.EscapeDataString(token)}";
+
             try
             {
-                await emailService.SendEmailConfirmationAsync(user.Email!, user.FullName, link);
+                await emailService.SendEmailConfirmationAsync(user.Email!, user.FullName, confirmationLink);
             }
-            catch
+            catch (Exception ex)
             {
-                // Email failed but registration still succeeds
-                Console.WriteLine($"Failed to send email to {user.Email}");
+                Console.WriteLine($"Failed to send confirmation email to {user.Email}: {ex.Message}");
             }
 
-            // 5. Generate token and return success
             var authResponse = await GenerateTokenAsync(user);
-            return ApiResponse<AuthResponseDto>.Success(authResponse);
+            return ApiResponse<AuthResponseDto>.Success(authResponse, "Registration successful. Please check your email to confirm your account.");
         }
 
         public async Task<ApiResponse<AuthResponseDto>> LoginAsync(LoginDto dto)
         {
-            // 1. Find user by email
             var user = await userManager.FindByEmailAsync(dto.Email);
             if (user == null)
-                return ApiResponse<AuthResponseDto>.Failure("لا يوجد حساب بهذا البريد الإلكتروني");
+                return ApiResponse<AuthResponseDto>.Failure("No account found with this email");
 
-            // 2. Check if account is active
             if (!user.IsActive)
-                return ApiResponse<AuthResponseDto>.Failure("هذا الحساب غير نشط. يرجى التواصل مع الدعم");
+                return ApiResponse<AuthResponseDto>.Failure("This account is inactive. Please contact support");
 
-            // 3. Check password
             var valid = await userManager.CheckPasswordAsync(user, dto.Password);
             if (!valid)
-                return ApiResponse<AuthResponseDto>.Failure("كلمة المرور غير صحيحة");
+                return ApiResponse<AuthResponseDto>.Failure("Incorrect password");
 
-            // 4. Generate token and return success
             var authResponse = await GenerateTokenAsync(user);
-            return ApiResponse<AuthResponseDto>.Success(authResponse);
+            return ApiResponse<AuthResponseDto>.Success(authResponse, "Login successful");
         }
 
         public async Task<ApiResponse<AuthResponseDto>> GoogleLoginAsync(string idToken)
         {
-            // 1. Validate Google token
             GoogleJsonWebSignature.Payload payload;
             try
             {
@@ -85,10 +76,9 @@ namespace ECommerceApi.Services.Implementations
             }
             catch
             {
-                return ApiResponse<AuthResponseDto>.Failure("Google token غير صالح");
+                return ApiResponse<AuthResponseDto>.Failure("Invalid Google token");
             }
 
-            // 2. Find or create user
             var user = await userManager.FindByEmailAsync(payload.Email);
             if (user == null)
             {
@@ -110,23 +100,19 @@ namespace ECommerceApi.Services.Implementations
                 await userManager.AddToRoleAsync(user, "Customer");
             }
 
-            // 3. Check if account is active
             if (!user.IsActive)
-                return ApiResponse<AuthResponseDto>.Failure("هذا الحساب غير نشط");
+                return ApiResponse<AuthResponseDto>.Failure("This account is inactive");
 
-            // 4. Generate token and return success
             var authResponse = await GenerateTokenAsync(user);
-            return ApiResponse<AuthResponseDto>.Success(authResponse);
+            return ApiResponse<AuthResponseDto>.Success(authResponse, "Login successful");
         }
 
         public async Task<ApiResponse<string>> ConfirmEmailAsync(string userId, string token)
         {
-            // 1. Find user
             var user = await userManager.FindByIdAsync(userId);
             if (user == null)
-                return ApiResponse<string>.Failure("المستخدم غير موجود");
+                return ApiResponse<string>.Failure("User not found");
 
-            // 2. Confirm email
             var result = await userManager.ConfirmEmailAsync(user, token);
             if (!result.Succeeded)
             {
@@ -134,18 +120,22 @@ namespace ECommerceApi.Services.Implementations
                 return ApiResponse<string>.Failure(errors);
             }
 
-            // 3. Return success
-            return ApiResponse<string>.Success("تم تأكيد البريد الإلكتروني بنجاح");
+            try
+            {
+                await emailService.SendWelcomeEmailAsync(user.Email!, user.FullName);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to send welcome email: {ex.Message}");
+            }
+
+            return ApiResponse<string>.Success("Your email has been confirmed successfully!", "Email confirmed successfully");
         }
 
         public Task<bool> LogoutAsync(string userId)
         {
-            // JWT stateless — logout is handled by client by deleting token
-            // If you need blacklist, add Redis here
             return Task.FromResult(true);
         }
-
-        // ─── Private Helpers ────────────────────────────────────────
 
         private async Task<AuthResponseDto> GenerateTokenAsync(ApplicationUser user)
         {
