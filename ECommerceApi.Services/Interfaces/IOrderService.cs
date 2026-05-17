@@ -9,6 +9,7 @@ namespace ECommerceApi.Services.Interfaces
         Task<ApiResponse<bool>> CancelAsync(int id, string userId);
         Task<ApiResponse<bool>> UpdateStatusAsync(int id, string status, string adminId);
         Task<ApiResponse<List<OrderDto>>> GetAllOrdersAsync(string adminId);
+        Task<ApiResponse<List<OrderDto>>> GetSellerOrdersAsync(string sellerId);
     }
 
 }

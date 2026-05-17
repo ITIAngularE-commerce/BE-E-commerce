@@ -290,5 +290,36 @@ namespace ECommerceApi.Services.Implementations
                 }).ToList()
             };
         }
+
+        public async Task<ApiResponse<List<OrderDto>>> GetSellerOrdersAsync(string sellerId)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(sellerId))
+                    return ApiResponse<List<OrderDto>>.Failure("Seller ID is required");
+
+                var orders = await db.Orders
+                    .Include(o => o.Items)
+                        .ThenInclude(i => i.Product)
+                    .Include(o => o.Address)
+                    .Include(o => o.User)
+                    .Where(o => o.Items.Any(i => i.Product != null && i.Product.SellerId == sellerId))
+                    .OrderByDescending(o => o.CreatedAt)
+                    .ToListAsync();
+
+                if (!orders.Any())
+                    return ApiResponse<List<OrderDto>>.Success(
+                        new List<OrderDto>(), "No orders found for this seller");
+
+                var orderDtos = orders.Select(MapToDto).ToList();
+                return ApiResponse<List<OrderDto>>.Success(
+                    orderDtos, $"Successfully retrieved {orderDtos.Count} order(s)");
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<List<OrderDto>>.Failure(
+                    $"An error occurred while retrieving seller orders: {ex.Message}");
+            }
+        }
     }
 }

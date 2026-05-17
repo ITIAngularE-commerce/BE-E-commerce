@@ -270,5 +270,21 @@ namespace ECommerceApi.API.Controllers
                 data = result.Data
             });
         }
+
+        [HttpGet("seller")]
+        [Authorize(Roles = "Seller")]
+        public async Task<IActionResult> GetSellerOrders()
+        {
+            var sellerId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(sellerId))
+                return Unauthorized(new { success = false, message = "User not authenticated" });
+
+            var result = await orderService.GetSellerOrdersAsync(sellerId);
+
+            if (!result.IsSuccess)
+                return BadRequest(new { success = false, message = result.ErrorMessage });
+
+            return Ok(new { success = true, message = result.Message, data = result.Data });
+        }
     }
 }
